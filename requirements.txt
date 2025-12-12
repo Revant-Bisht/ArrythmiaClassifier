@@ -1,0 +1,27 @@
+# Core ML
+torch==2.3.1
+torchvision==0.18.1
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.5.1
+
+# ECG / signal processing
+wfdb==4.1.2
+neurokit2==0.2.9
+scipy==1.13.1
+
+# Config & utilities
+pyyaml==6.0.1
+tqdm==4.66.4
+einops==0.8.0
+
+# Experiment tracking
+wandb==0.17.5
+
+# ONNX export & inference
+onnx==1.16.1
+onnxruntime==1.18.1
+
+# Visualization (EDA & explainability)
+matplotlib==3.9.1
+seaborn==0.13.2

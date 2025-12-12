@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Data — never commit raw or processed ECG data
+data/raw/
+data/processed/
+
+# Model checkpoints and ONNX exports
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+
+# Weights & Biases
+wandb/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Linting cache
+.ruff_cache/
+.mypy_cache/
+
+# Environment files
+.env
+.env.local
+
+# Logs
+logs/
+*.log
