@@ -1,15 +1,4 @@
-"""PTB-XL label schema: SCP code → 5-class superdiagnostic mapping.
-
-Design:
-  - ``Superclass`` is a ``str`` Enum so it serialises cleanly (e.g. to JSON/YAML)
-    and can be used directly as a string key without `.value` noise.
-  - The authoritative source of truth is ``_SUPERCLASS_CODES`` — a dict of
-    *Superclass → frozenset of SCP codes*.  The lookup table ``SCP_CODE_MAP``
-    is derived from it, so there is exactly one place to add/remove codes.
-
-Source: PTB-XL paper Table 1 (Wagner et al., 2020) + ptbxl_database.csv
-        ``diagnostic_superclass`` field.
-"""
+"""PTB-XL label schema: SCP code → 5-class superdiagnostic mapping."""
 
 from __future__ import annotations
 
@@ -24,8 +13,6 @@ class Superclass(str, Enum):
     STTC = "STTC"  # ST/T-wave Change
     CD = "CD"  # Conduction Disturbance
     HYP = "HYP"  # Hypertrophy
-
-    # ── Convenience ────────────────────────────────────────────────────────────
 
     @property
     def index(self) -> int:
@@ -44,8 +31,6 @@ class Superclass(str, Enum):
         return self.value
 
 
-# ── Human-readable names ───────────────────────────────────────────────────────
-
 _FULL_NAMES: dict[Superclass, str] = {
     Superclass.NORM: "Normal",
     Superclass.MI: "Myocardial Infarction",
@@ -63,10 +48,6 @@ _CLINICAL_DESCRIPTIONS: dict[Superclass, str] = {
     Superclass.CD: "Abnormal conduction: bundle branch block, AV block, or accessory pathway.",
     Superclass.HYP: "Ventricular or atrial hypertrophy — increased voltage or axis deviation.",
 }
-
-
-# ── SCP code groups (source of truth) ─────────────────────────────────────────
-# Each entry maps a Superclass to the set of PTB-XL SCP codes that belong to it.
 
 _SUPERCLASS_CODES: dict[Superclass, frozenset[str]] = {
     Superclass.NORM: frozenset(
@@ -136,14 +117,10 @@ _SUPERCLASS_CODES: dict[Superclass, frozenset[str]] = {
     ),
 }
 
-# ── Derived lookup (used by dataset.py) ───────────────────────────────────────
-
-#: Flat reverse map: SCP code string → Superclass
 SCP_CODE_MAP: dict[str, Superclass] = {
     code: superclass for superclass, codes in _SUPERCLASS_CODES.items() for code in codes
 }
 
-#: Ordered list of all superclasses — index position == Superclass.index
 SUPERCLASSES: list[Superclass] = list(Superclass)
 
 NUM_CLASSES: int = len(SUPERCLASSES)

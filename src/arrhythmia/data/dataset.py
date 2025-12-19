@@ -81,8 +81,6 @@ class PTBXLDataset(Dataset):
             self._class_counts(),
         )
 
-    # ── Label helpers ──────────────────────────────────────────────────────────
-
     @staticmethod
     def _extract_superclasses(
         scp_codes: dict[str, float], min_likelihood: float
@@ -99,8 +97,6 @@ class PTBXLDataset(Dataset):
         for cls in superclasses:
             vec[cls.index] = 1.0
         return vec
-
-    # ── Signal loading ─────────────────────────────────────────────────────────
 
     def _load_signal(self, filename_lr: str) -> np.ndarray:
         """Load a 12-lead waveform; returns array (12, T) in float32."""
@@ -119,8 +115,6 @@ class PTBXLDataset(Dataset):
         mean = signal.mean(axis=-1, keepdims=True)
         std = signal.std(axis=-1, keepdims=True) + 1e-8
         return (signal - mean) / std
-
-    # ── Dataset interface ──────────────────────────────────────────────────────
 
     def __len__(self) -> int:
         return len(self._df)
@@ -142,8 +136,6 @@ class PTBXLDataset(Dataset):
             "sex": int(row["sex"]) if not pd.isna(row["sex"]) else -1,
         }
         return signal_t, label, meta
-
-    # ── Utility ────────────────────────────────────────────────────────────────
 
     def class_weights(self) -> torch.Tensor:
         """Inverse-frequency weights for weighted BCE loss (shape: NUM_CLASSES)."""

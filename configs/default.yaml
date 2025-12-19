@@ -20,7 +20,7 @@ model:
   num_classes: 5
   num_inception_blocks: 3
   num_filters: 32               # filters per inception branch (×3 kernel sizes + maxpool)
-  bottleneck_size: 32           # 1×1 conv before each inception branch
+  bottleneck_size: 32           # 1x1 conv before each inception branch
   use_residual: true
   attention_hidden: 64
 

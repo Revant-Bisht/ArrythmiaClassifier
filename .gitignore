@@ -61,3 +61,7 @@ htmlcov/
 # Logs
 logs/
 *.log
+
+# Local planning docs — not for the public repo
+PROJECT_PLAN.md
+PROGRESS.md
