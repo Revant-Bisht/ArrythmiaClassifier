@@ -6,18 +6,19 @@ Usage:
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
+from arrhythmia.utils import get_logger
+
+log = get_logger(__name__)
 
 PTBXL_URL = "https://physionet.org/files/ptb-xl/1.0.3/"
+EXPECTED_RECORDS = 21_837
 
 
 def download(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"Downloading PTB-XL → {output_dir}")
-    print("This is ~1.8 GB. Grab a coffee.\n")
+    log.info("Downloading PTB-XL → %s  (approx 1.8 GB)", output_dir)
 
     cmd = [
         "wget",
@@ -29,10 +30,10 @@ def download(output_dir: Path) -> None:
         str(output_dir),
         PTBXL_URL,
     ]
-
     result = subprocess.run(cmd)
+
     if result.returncode != 0:
-        print("\nwget failed. Trying rsync as fallback...")
+        log.warning("wget exited with code %d — trying rsync fallback", result.returncode)
         rsync_cmd = [
             "rsync",
             "-Cavz",
@@ -41,29 +42,33 @@ def download(output_dir: Path) -> None:
         ]
         subprocess.run(rsync_cmd, check=True)
 
-    print(f"\nDownload complete. Files in: {output_dir}")
+    log.info("Download finished — verifying contents")
     _verify(output_dir)
 
 
 def _verify(root: Path) -> None:
-    required = ["ptbxl_database.csv", "scp_statements.csv"]
-    for f in required:
-        if not (root / f).exists():
-            print(f"WARNING: expected file not found: {root / f}")
+    for fname in ("ptbxl_database.csv", "scp_statements.csv"):
+        path = root / fname
+        if path.exists():
+            log.info("  OK  %s", fname)
         else:
-            print(f"  OK  {f}")
+            log.error("  MISSING  %s — download may be incomplete", path)
 
     records = list(root.glob("records100/**/*.hea"))
-    print(f"  Found {len(records):,} 100 Hz ECG record headers")
-    if len(records) < 21000:
-        print("  WARNING: expected ~21,837 records — download may be incomplete")
+    n = len(records)
+    log.info("  Found %d 100 Hz ECG record headers (expected ~%d)", n, EXPECTED_RECORDS)
+    if n < EXPECTED_RECORDS:
+        log.warning(
+            "Record count %d < expected %d — re-run download or check network",
+            n,
+            EXPECTED_RECORDS,
+        )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Download PTB-XL from PhysioNet")
     parser.add_argument("--output-dir", required=True, help="Destination directory")
     args = parser.parse_args()
-
     download(Path(args.output_dir))
 
 

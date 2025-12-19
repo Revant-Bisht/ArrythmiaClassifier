@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -11,78 +13,105 @@ import torch
 import wfdb
 from torch.utils.data import Dataset
 
-from .labels import LABEL_MAP, SUPERCLASS_INDEX, SUPERCLASS_NAMES
+from ..utils import get_logger
+from .labels import NUM_CLASSES, SCP_CODE_MAP, SUPERCLASSES, Superclass
+
+log = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class PTBXLConfig:
+    """Immutable configuration for a PTB-XL dataset split.
+
+    Frozen so it can be hashed, logged, and passed around without
+    risk of accidental mutation after the Dataset is constructed.
+    """
+
+    root_dir: Path
+    sampling_rate: int = 100
+    folds: tuple[int, ...] = field(default_factory=tuple)
+    min_likelihood: float = 100.0  # only accept codes with likelihood == 100 %
+
+    def __post_init__(self) -> None:
+        if self.sampling_rate not in (100, 500):
+            raise ValueError(f"sampling_rate must be 100 or 500, got {self.sampling_rate}")
+        if not (0.0 <= self.min_likelihood <= 100.0):
+            raise ValueError(f"min_likelihood must be in [0, 100], got {self.min_likelihood}")
 
 
 class PTBXLDataset(Dataset):
     """PyTorch Dataset for the PTB-XL ECG database.
 
-    Returns:
-        signal  : FloatTensor of shape (12, T)  — 12 leads, T timesteps
-        label   : FloatTensor of shape (5,)     — multi-hot superdiagnostic vector
-        meta    : dict with age, sex, ecg_id    — useful for the demo UI
+    Returns per ``__getitem__``:
+        signal : FloatTensor (12, T)  — 12 leads, T timesteps (1000 @ 100 Hz)
+        label  : FloatTensor (5,)     — multi-hot superdiagnostic vector
+        meta   : dict[str, Any]       — ecg_id, age, sex (for the demo UI)
     """
 
     def __init__(
         self,
-        root_dir: str | Path,
-        sampling_rate: int = 100,
-        folds: list[int] | None = None,
-        transform=None,
+        config: PTBXLConfig,
+        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
-        self.root = Path(root_dir)
-        self.sampling_rate = sampling_rate
+        self.config = config
         self.transform = transform
 
-        df = pd.read_csv(self.root / "ptbxl_database.csv", index_col="ecg_id")
+        log.info(
+            "Loading PTB-XL from %s | folds=%s | fs=%d Hz | min_likelihood=%.0f%%",
+            config.root_dir,
+            list(config.folds) or "all",
+            config.sampling_rate,
+            config.min_likelihood,
+        )
+
+        df = pd.read_csv(config.root_dir / "ptbxl_database.csv", index_col="ecg_id")
         df["scp_codes"] = df["scp_codes"].apply(ast.literal_eval)
 
-        if folds is not None:
-            df = df[df["strat_fold"].isin(folds)]
+        if config.folds:
+            df = df[df["strat_fold"].isin(config.folds)]
 
-        # Only keep records that have ≥1 superdiagnostic label
-        df["superclass"] = df["scp_codes"].apply(self._extract_superclasses)
-        self.df = df[df["superclass"].apply(len) > 0].reset_index()
+        df["superclass"] = df["scp_codes"].apply(
+            lambda codes: self._extract_superclasses(codes, config.min_likelihood)
+        )
+        self._df = df[df["superclass"].apply(len) > 0].reset_index()
+
+        log.info(
+            "Loaded %d records — class counts: %s",
+            len(self._df),
+            self._class_counts(),
+        )
 
     # ── Label helpers ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def _extract_superclasses(scp_codes: dict[str, float]) -> list[str]:
-        """Map a record's SCP codes to unique superdiagnostic class names."""
-        classes: set[str] = set()
+    def _extract_superclasses(
+        scp_codes: dict[str, float], min_likelihood: float
+    ) -> list[Superclass]:
+        seen: set[Superclass] = set()
         for code, likelihood in scp_codes.items():
-            if likelihood >= 100 and code in LABEL_MAP:
-                classes.add(LABEL_MAP[code])
-        return list(classes)
+            if likelihood >= min_likelihood and code in SCP_CODE_MAP:
+                seen.add(SCP_CODE_MAP[code])
+        return list(seen)
 
-    def _make_label_vector(self, superclasses: list[str]) -> torch.Tensor:
-        vec = torch.zeros(len(SUPERCLASS_NAMES), dtype=torch.float32)
+    @staticmethod
+    def _make_label_vector(superclasses: list[Superclass]) -> torch.Tensor:
+        vec = torch.zeros(NUM_CLASSES, dtype=torch.float32)
         for cls in superclasses:
-            vec[SUPERCLASS_INDEX[cls]] = 1.0
+            vec[cls.index] = 1.0
         return vec
 
     # ── Signal loading ─────────────────────────────────────────────────────────
 
     def _load_signal(self, filename_lr: str) -> np.ndarray:
-        """Load a 12-lead ECG waveform from the PTB-XL WFDB files.
-
-        Returns array of shape (12, T).
-        """
-        if self.sampling_rate == 100:
-            path = self.root / filename_lr
+        """Load a 12-lead waveform; returns array (12, T) in float32."""
+        if self.config.sampling_rate == 100:
+            path = self.config.root_dir / filename_lr
         else:
-            # 500 Hz files stored under records500/
-            path = self.root / filename_lr.replace("records100", "records500")
+            path = self.config.root_dir / filename_lr.replace("records100", "records500")
 
         record = wfdb.rdrecord(str(path.with_suffix("")))
-        signal = record.p_signal  # shape (T, 12)
-        signal = signal.T  # → (12, T)
-
-        # Replace NaN (rare signal gaps) with zeros
-        signal = np.nan_to_num(signal, nan=0.0)
-        return signal.astype(np.float32)
-
-    # ── Normalisation ──────────────────────────────────────────────────────────
+        signal: np.ndarray = record.p_signal.T  # (T, 12) → (12, T)
+        return np.nan_to_num(signal, nan=0.0).astype(np.float32)
 
     @staticmethod
     def _normalize(signal: np.ndarray) -> np.ndarray:
@@ -94,17 +123,16 @@ class PTBXLDataset(Dataset):
     # ── Dataset interface ──────────────────────────────────────────────────────
 
     def __len__(self) -> int:
-        return len(self.df)
+        return len(self._df)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, dict]:
-        row = self.df.iloc[idx]
+        row = self._df.iloc[idx]
 
-        signal = self._load_signal(row["filename_lr"])
-        signal = self._normalize(signal)
-        signal_tensor = torch.from_numpy(signal)
+        signal = self._normalize(self._load_signal(row["filename_lr"]))
+        signal_t = torch.from_numpy(signal)
 
         if self.transform is not None:
-            signal_tensor = self.transform(signal_tensor)
+            signal_t = self.transform(signal_t)
 
         label = self._make_label_vector(row["superclass"])
 
@@ -113,16 +141,21 @@ class PTBXLDataset(Dataset):
             "age": float(row["age"]) if not pd.isna(row["age"]) else -1.0,
             "sex": int(row["sex"]) if not pd.isna(row["sex"]) else -1,
         }
-
-        return signal_tensor, label, meta
+        return signal_t, label, meta
 
     # ── Utility ────────────────────────────────────────────────────────────────
 
     def class_weights(self) -> torch.Tensor:
-        """Inverse-frequency class weights for weighted BCE loss."""
-        counts = torch.zeros(len(SUPERCLASS_NAMES))
-        for superclasses in self.df["superclass"]:
+        """Inverse-frequency weights for weighted BCE loss (shape: NUM_CLASSES)."""
+        counts = torch.zeros(NUM_CLASSES)
+        for superclasses in self._df["superclass"]:
             for cls in superclasses:
-                counts[SUPERCLASS_INDEX[cls]] += 1
-        weights = len(self.df) / (len(SUPERCLASS_NAMES) * counts.clamp(min=1))
-        return weights
+                counts[cls.index] += 1
+        return len(self._df) / (NUM_CLASSES * counts.clamp(min=1))
+
+    def _class_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {cls.value: 0 for cls in SUPERCLASSES}
+        for superclasses in self._df["superclass"]:
+            for cls in superclasses:
+                counts[cls.value] += 1
+        return counts

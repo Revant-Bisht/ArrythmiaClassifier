@@ -40,7 +40,7 @@ The user lands on a **single, cinematic page**:
    - Inference runs via a lightweight FastAPI backend (or ONNX in-browser for speed)
 
 3. **Scroll CTA**
-   - At the bottom: "See How We Built This ↓"
+   - At the bottom: "See How I Built This ↓"
 
 ---
 

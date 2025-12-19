@@ -1,18 +1,69 @@
-"""Tests for the label mapping logic."""
+"""Tests for the label mapping and Superclass enum."""
 
-import torch
-from arrhythmia.data.labels import LABEL_MAP, SUPERCLASS_INDEX, SUPERCLASS_NAMES
+import pytest
 
-
-def test_superclass_names_count():
-    assert len(SUPERCLASS_NAMES) == 5
-
-
-def test_all_label_map_values_valid():
-    for code, superclass in LABEL_MAP.items():
-        assert superclass in SUPERCLASS_NAMES, f"{code} → unknown superclass {superclass}"
+from arrhythmia.data.labels import (
+    _SUPERCLASS_CODES,
+    NUM_CLASSES,
+    SCP_CODE_MAP,
+    SUPERCLASSES,
+    Superclass,
+)
 
 
-def test_superclass_index_complete():
-    assert set(SUPERCLASS_INDEX.keys()) == set(SUPERCLASS_NAMES)
-    assert list(SUPERCLASS_INDEX.values()) == list(range(5))
+def test_num_classes():
+    assert NUM_CLASSES == 5
+
+
+def test_superclass_is_str():
+    """Superclass must serialise as a plain string (for JSON/YAML compatibility)."""
+    assert str(Superclass.MI) == "MI"
+    assert Superclass.NORM == "NORM"
+
+
+def test_superclass_index_stable():
+    """Indices must be 0–4 in declaration order."""
+    assert [cls.index for cls in Superclass] == list(range(5))
+
+
+def test_superclass_has_metadata():
+    for cls in Superclass:
+        assert cls.full_name
+        assert cls.clinical_description
+
+
+def test_scp_codes_no_overlap():
+    """Each SCP code must belong to exactly one superclass."""
+    seen: dict[str, Superclass] = {}
+    for superclass, codes in _SUPERCLASS_CODES.items():
+        for code in codes:
+            assert (
+                code not in seen
+            ), f"SCP code '{code}' appears in both {seen[code]} and {superclass}"
+            seen[code] = superclass
+
+
+def test_scp_code_map_covers_all_groups():
+    """Derived SCP_CODE_MAP must contain every code from every group."""
+    for superclass, codes in _SUPERCLASS_CODES.items():
+        for code in codes:
+            assert code in SCP_CODE_MAP
+            assert SCP_CODE_MAP[code] is superclass
+
+
+def test_superclasses_list_matches_enum():
+    assert list(Superclass) == SUPERCLASSES
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("NORM", Superclass.NORM),
+        ("AMI", Superclass.MI),
+        ("LBBB", Superclass.CD),
+        ("STD_", Superclass.STTC),
+        ("LVH", Superclass.HYP),
+    ],
+)
+def test_known_mappings(code, expected):
+    assert SCP_CODE_MAP[code] is expected
