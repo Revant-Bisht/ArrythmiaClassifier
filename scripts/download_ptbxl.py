@@ -1,47 +1,31 @@
 """Download the PTB-XL dataset from PhysioNet.
 
+Uses wfdb.dl_database — no wget/curl dependency required.
+
 Usage:
     python scripts/download_ptbxl.py --output-dir data/raw/ptb-xl
 """
 
 import argparse
-import subprocess
 from pathlib import Path
+
+import wfdb
 
 from arrhythmia.utils import get_logger
 
 log = get_logger(__name__)
 
-PTBXL_URL = "https://physionet.org/files/ptb-xl/1.0.3/"
+PTBXL_DB = "ptb-xl"  # wfdb resolves to the latest version (1.0.3)
 EXPECTED_RECORDS = 21_837
 
 
 def download(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    log.info("Downloading PTB-XL → %s  (approx 1.8 GB)", output_dir)
-
-    cmd = [
-        "wget",
-        "--recursive",
-        "--no-parent",
-        "--no-host-directories",
-        "--cut-dirs=2",
-        "--directory-prefix",
-        str(output_dir),
-        PTBXL_URL,
-    ]
-    result = subprocess.run(cmd)
-
-    if result.returncode != 0:
-        log.warning("wget exited with code %d — trying rsync fallback", result.returncode)
-        rsync_cmd = [
-            "rsync",
-            "-Cavz",
-            "physionet.org::files/ptb-xl/1.0.3/",
-            str(output_dir),
-        ]
-        subprocess.run(rsync_cmd, check=True)
-
+    log.info(
+        "Downloading PTB-XL via wfdb → %s  (~1.8 GB, ~21k records — grab a coffee)",
+        output_dir,
+    )
+    wfdb.dl_database(PTBXL_DB, dl_dir=str(output_dir))
     log.info("Download finished — verifying contents")
     _verify(output_dir)
 
@@ -59,7 +43,7 @@ def _verify(root: Path) -> None:
     log.info("  Found %d 100 Hz ECG record headers (expected ~%d)", n, EXPECTED_RECORDS)
     if n < EXPECTED_RECORDS:
         log.warning(
-            "Record count %d < expected %d — re-run download or check network",
+            "Record count %d < expected %d — re-run to resume",
             n,
             EXPECTED_RECORDS,
         )
