@@ -1,3 +1,3 @@
-from .inception_time import InceptionTimeAttention
+from .inception_time_attention import InceptionTimeAttention
 
 __all__ = ["InceptionTimeAttention"]
