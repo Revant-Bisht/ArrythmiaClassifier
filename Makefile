@@ -1,10 +1,10 @@
 .PHONY: help install install-dev setup-hooks download-data process-data \
         train evaluate export-onnx test lint format clean
 
-PYTHON  := python
-PIP     := pip
-SRC     := src
-CONFIG  := configs/default.yaml
+PYTHON := python
+PIP    := pip
+SRC    := src
+CONFIG := configs/default.yaml
 
 help:
 	@echo ""
@@ -31,8 +31,6 @@ help:
 	@echo ""
 	@echo "    make clean          Remove caches and compiled artefacts"
 
-# ── Setup ──────────────────────────────────────────────────────────────────────
-
 install:
 	$(PIP) install -r requirements.txt
 	$(PIP) install -e .
@@ -44,15 +42,11 @@ install-dev:
 setup-hooks:
 	pre-commit install
 
-# ── Data ───────────────────────────────────────────────────────────────────────
-
 download-data:
 	$(PYTHON) scripts/download_ptbxl.py --output-dir data/raw/ptb-xl
 
 process-data:
 	$(PYTHON) scripts/process_data.py --config $(CONFIG)
-
-# ── Training ───────────────────────────────────────────────────────────────────
 
 train:
 	$(PYTHON) scripts/train.py --config $(CONFIG)
@@ -62,8 +56,6 @@ evaluate:
 
 export-onnx:
 	$(PYTHON) scripts/export_onnx.py --config $(CONFIG)
-
-# ── Quality ────────────────────────────────────────────────────────────────────
 
 test:
 	pytest
@@ -75,8 +67,6 @@ lint:
 format:
 	black $(SRC) tests scripts
 	ruff check --fix $(SRC) tests scripts
-
-# ── Housekeeping ───────────────────────────────────────────────────────────────
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

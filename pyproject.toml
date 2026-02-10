@@ -13,29 +13,25 @@ readme = "README.md"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# ── Black ──────────────────────────────────────────────────────────────────────
 [tool.black]
 line-length = 100
 target-version = ["py39"]
 
-# ── Ruff ───────────────────────────────────────────────────────────────────────
 [tool.ruff]
 line-length = 100
 target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]  # line length handled by black
+ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["arrhythmia"]
 
-# ── Pytest ─────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=arrhythmia --cov-report=term-missing -v"
 
-# ── Mypy ───────────────────────────────────────────────────────────────────────
 [tool.mypy]
 python_version = "3.9"
 warn_return_any = true
