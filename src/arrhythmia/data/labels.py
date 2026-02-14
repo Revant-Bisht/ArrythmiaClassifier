@@ -8,15 +8,14 @@ from enum import Enum
 class Superclass(str, Enum):
     """Five superdiagnostic classes used in the PTB-XL benchmark."""
 
-    NORM = "NORM"  # Normal ECG
-    MI = "MI"  # Myocardial Infarction
-    STTC = "STTC"  # ST/T-wave Change
-    CD = "CD"  # Conduction Disturbance
-    HYP = "HYP"  # Hypertrophy
+    NORM = "NORM"
+    MI = "MI"
+    STTC = "STTC"
+    CD = "CD"
+    HYP = "HYP"
 
     @property
     def index(self) -> int:
-        """Integer index — stable, matches the order declared above."""
         return list(Superclass).index(self)
 
     @property
@@ -27,7 +26,7 @@ class Superclass(str, Enum):
     def clinical_description(self) -> str:
         return _CLINICAL_DESCRIPTIONS[self]
 
-    def __str__(self) -> str:  # keeps str(Superclass.MI) == "MI"
+    def __str__(self) -> str:
         return self.value
 
 
@@ -50,11 +49,7 @@ _CLINICAL_DESCRIPTIONS: dict[Superclass, str] = {
 }
 
 _SUPERCLASS_CODES: dict[Superclass, frozenset[str]] = {
-    Superclass.NORM: frozenset(
-        {
-            "NORM",
-        }
-    ),
+    Superclass.NORM: frozenset({"NORM"}),
     Superclass.MI: frozenset(
         {
             "AMI",

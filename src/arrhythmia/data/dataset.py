@@ -21,16 +21,12 @@ log = get_logger(__name__)
 
 @dataclass(frozen=True)
 class PTBXLConfig:
-    """Immutable configuration for a PTB-XL dataset split.
-
-    Frozen so it can be hashed, logged, and passed around without
-    risk of accidental mutation after the Dataset is constructed.
-    """
+    """Configuration for a PTB-XL dataset split."""
 
     root_dir: Path
     sampling_rate: int = 100
     folds: tuple[int, ...] = field(default_factory=tuple)
-    min_likelihood: float = 100.0  # only accept codes with likelihood == 100 %
+    min_likelihood: float = 100.0
 
     def __post_init__(self) -> None:
         if self.sampling_rate not in (100, 500):
@@ -43,9 +39,9 @@ class PTBXLDataset(Dataset):
     """PyTorch Dataset for the PTB-XL ECG database.
 
     Returns per ``__getitem__``:
-        signal : FloatTensor (12, T)  — 12 leads, T timesteps (1000 @ 100 Hz)
+        signal : FloatTensor (12, T)  — 12 leads, T timesteps
         label  : FloatTensor (5,)     — multi-hot superdiagnostic vector
-        meta   : dict[str, Any]       — ecg_id, age, sex (for the demo UI)
+        meta   : dict                 — ecg_id, age, sex
     """
 
     def __init__(
@@ -73,13 +69,35 @@ class PTBXLDataset(Dataset):
         df["superclass"] = df["scp_codes"].apply(
             lambda codes: self._extract_superclasses(codes, config.min_likelihood)
         )
-        self._df = df[df["superclass"].apply(len) > 0].reset_index()
+        df = df[df["superclass"].apply(len) > 0].reset_index()
+
+        # Filter out records whose waveform files are unreadable (e.g. corrupted download)
+        readable_mask = df["filename_lr"].apply(lambda fn: self._is_readable(config.root_dir / fn))
+        n_bad = (~readable_mask).sum()
+        if n_bad:
+            log.warning("Skipping %d unreadable record(s)", n_bad)
+        self._df = df[readable_mask].reset_index(drop=True)
 
         log.info(
             "Loaded %d records — class counts: %s",
             len(self._df),
             self._class_counts(),
         )
+
+    @staticmethod
+    def _is_readable(path: Path) -> bool:
+        """Return False if the .dat file is clearly truncated relative to the .hea spec."""
+        hea = path.with_suffix(".hea")
+        dat = path.with_suffix(".dat")
+        if not hea.exists() or not dat.exists():
+            return False
+        try:
+            header = wfdb.rdheader(str(path))
+            # Expected bytes: samples × leads × bytes-per-sample (format 16 = 2 bytes)
+            expected = header.sig_len * header.n_sig * 2
+            return dat.stat().st_size >= expected
+        except Exception:
+            return False
 
     @staticmethod
     def _extract_superclasses(
@@ -99,7 +117,7 @@ class PTBXLDataset(Dataset):
         return vec
 
     def _load_signal(self, filename_lr: str) -> np.ndarray:
-        """Load a 12-lead waveform; returns array (12, T) in float32."""
+        """Load a 12-lead waveform; returns float32 array of shape (12, T)."""
         if self.config.sampling_rate == 100:
             path = self.config.root_dir / filename_lr
         else:
@@ -138,7 +156,7 @@ class PTBXLDataset(Dataset):
         return signal_t, label, meta
 
     def class_weights(self) -> torch.Tensor:
-        """Inverse-frequency weights for weighted BCE loss (shape: NUM_CLASSES)."""
+        """Inverse-frequency weights for weighted BCE loss."""
         counts = torch.zeros(NUM_CLASSES)
         for superclasses in self._df["superclass"]:
             for cls in superclasses:
