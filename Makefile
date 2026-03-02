@@ -1,5 +1,5 @@
 .PHONY: help install install-dev setup-hooks download-data process-data \
-        train evaluate export-onnx test lint format clean
+        train evaluate export-onnx cache-samples serve test lint format clean
 
 PYTHON := python
 PIP    := pip
@@ -23,6 +23,8 @@ help:
 	@echo "    make train          Train the InceptionTime+Attention model"
 	@echo "    make evaluate       Run evaluation on the held-out test set"
 	@echo "    make export-onnx    Export trained model to ONNX"
+	@echo "    make cache-samples  Pre-compute 5 sample responses for the API cache"
+	@echo "    make serve          Run FastAPI backend locally on port 8080"
 	@echo ""
 	@echo "  Quality"
 	@echo "    make test           Run pytest with coverage"
@@ -56,6 +58,12 @@ evaluate:
 
 export-onnx:
 	$(PYTHON) scripts/export_onnx.py --config $(CONFIG)
+
+cache-samples:
+	$(PYTHON) scripts/cache_samples.py --config $(CONFIG)
+
+serve:
+	uvicorn backend.app:app --host 0.0.0.0 --port 8080 --reload
 
 test:
 	pytest
