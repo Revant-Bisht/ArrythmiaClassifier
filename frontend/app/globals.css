@@ -1,0 +1,40 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy-950: #030712;
+  --navy-900: #0a0f1e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--navy-900);
+  color: #f9fafb;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ecg-grid line {
+  stroke: #1f2937;
+  stroke-width: 0.5;
+}
+
+.ecg-grid path {
+  display: none;
+}
+
+.axis-label text {
+  fill: #6b7280;
+  font-size: 10px;
+}
+
+.axis-label path,
+.axis-label line {
+  stroke: #374151;
+}
