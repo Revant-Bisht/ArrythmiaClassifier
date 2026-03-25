@@ -1,73 +1,169 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion, useAnimation, type AnimationControls } from "framer-motion";
+import { getPreloaded } from "@/lib/api";
+import type { PredictResponse } from "@/lib/types";
 
-const VW = 330;
-const VH = 90;
-const N_BARS = 42;
+// ─── Layout constants ─────────────────────────────────────────────────────────
+const VW = 330;       // SVG viewBox width
+const VH = 90;        // SVG viewBox height
+const N_SIG = 180;    // ECG display samples (downsampled from 1000)
+const N_BARS = 42;    // Feature-map bar count
 
-// Simplified Lead II ECG shape — two QRS complexes
-const ECG_PATH =
-  "M0,45 L30,45 C36,44 40,38 47,45 L64,45 L68,56 L71,8 L75,45 L86,45 C96,32 111,32 121,45 L165,45 L195,45 C201,44 205,38 212,45 L229,45 L233,56 L236,8 L240,45 L251,45 C261,32 276,32 286,45 L330,45";
+// ─── Processing helpers ───────────────────────────────────────────────────────
 
-// Activation shapes that mimic what an inception conv responds to in an MI ECG
-function syntheticBars(seed: number) {
+/** Downsample signal to N points and emit an SVG L-path in the given viewBox */
+function signalToPath(signal: number[]): string {
+  const step = signal.length / N_SIG;
+  const pts = Array.from({ length: N_SIG }, (_, i) => signal[Math.floor(i * step)]);
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const rng = max - min || 1;
+  return pts
+    .map((v, i) => {
+      const x = (i / (N_SIG - 1)) * VW;
+      const y = VH - ((v - min) / rng) * (VH - 20) - 10;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+/** Bin + smooth gradcam → N_BARS heights in [5, 100] %.
+ *  smoothR controls receptive field size: larger = wider kernel behaviour. */
+function gcamBins(gradcam: number[], smoothR: number): number[] {
+  const step = gradcam.length / N_BARS;
+  const raw = Array.from({ length: N_BARS }, (_, i) => {
+    const s = Math.floor(i * step);
+    const e = Math.min(Math.floor((i + 1) * step), gradcam.length);
+    return gradcam.slice(s, e).reduce((a, b) => a + b, 0) / Math.max(1, e - s);
+  });
+  const sm = raw.map((_, i) => {
+    let sum = 0, cnt = 0;
+    for (let j = Math.max(0, i - smoothR); j <= Math.min(N_BARS - 1, i + smoothR); j++) {
+      sum += raw[j]; cnt++;
+    }
+    return sum / cnt;
+  });
+  const mn = Math.min(...sm), mx = Math.max(...sm), r = mx - mn || 1;
+  return sm.map(v => Math.max(5, Math.min(100, ((v - mn) / r) * 80 + 15)));
+}
+
+/** Find contiguous high-attention bands, map to SVG x-coordinates */
+function attnRegions(attn: number[]) {
+  const thr = Math.max(...attn) * 0.5;
+  const out: { x: number; w: number; alpha: number }[] = [];
+  let s = -1;
+  for (let i = 0; i <= attn.length; i++) {
+    if (s < 0 && i < attn.length && attn[i] >= thr) s = i;
+    else if (s >= 0 && (i === attn.length || attn[i] < thr)) {
+      const len = i - s;
+      if (len >= attn.length * 0.015) {
+        const avg = attn.slice(s, i).reduce((a, b) => a + b, 0) / len;
+        out.push({ x: (s / attn.length) * VW, w: (len / attn.length) * VW, alpha: Math.min(0.55, avg * 0.65) });
+      }
+      s = -1;
+    }
+  }
+  return out.slice(0, 6);
+}
+
+// ─── Data model ───────────────────────────────────────────────────────────────
+interface HeroData {
+  ecgPath: string;
+  rows: { label: string; hint: string; bars: number[]; color: string }[];
+  attn: { x: number; w: number; alpha: number }[];
+  probs: Record<string, number>;
+  cls: string;
+  conf: number;
+}
+
+function fromApiResponse(d: PredictResponse): HeroData {
+  const gc = d.gradcam_per_class[d.predicted_class] ?? d.gradcam;
+  return {
+    ecgPath: signalToPath(d.signal_lead2),
+    rows: [
+      { label: "k = 40", hint: "long-range", bars: gcamBins(gc, 18), color: "#3b82f6" },
+      { label: "k = 20", hint: "mid-range",  bars: gcamBins(gc, 6),  color: "#06b6d4" },
+      { label: "k = 10", hint: "local",      bars: gcamBins(gc, 2),  color: "#8b5cf6" },
+    ],
+    attn: attnRegions(d.attention),
+    probs: d.probs,
+    cls: d.predicted_class,
+    conf: d.confidence,
+  };
+}
+
+// Fallback shown while/if API is unavailable
+function syntheticBars(s: number) {
   return Array.from({ length: N_BARS }, (_, i) => {
     const x = i / N_BARS;
     return Math.min(100, Math.max(6,
-      Math.exp(-((x - 0.19) ** 2) / 0.006) * 90 +
-      Math.exp(-((x - 0.71) ** 2) / 0.006) * 87 +
-      Math.exp(-((x - 0.28) ** 2) / 0.018) * 38 +
-      Math.exp(-((x - 0.80) ** 2) / 0.018) * 36 +
-      Math.sin(x * 16 + seed) * 6 + 12,
+      Math.exp(-((x - 0.19) ** 2) / 0.006) * 90 + Math.exp(-((x - 0.71) ** 2) / 0.006) * 87 +
+      Math.exp(-((x - 0.28) ** 2) / 0.018) * 38 + Math.exp(-((x - 0.80) ** 2) / 0.018) * 36 +
+      Math.sin(x * 16 + s) * 6 + 12
     ));
   });
 }
-
-const ROWS = [
-  { label: "k = 40", hint: "long-range", bars: syntheticBars(0.8), color: "#3b82f6" },
-  { label: "k = 20", hint: "mid-range",  bars: syntheticBars(2.1), color: "#06b6d4" },
-  { label: "k = 10", hint: "local",      bars: syntheticBars(3.9), color: "#8b5cf6" },
-];
-
-const ATTN = [
-  { x: 55,  w: 30, alpha: 0.55 },
-  { x: 220, w: 30, alpha: 0.50 },
-  { x: 93,  w: 18, alpha: 0.22 },
-  { x: 258, w: 18, alpha: 0.20 },
-];
-
-const CLASSES = ["NORM", "MI", "STTC", "CD", "HYP"];
-const CLR: Record<string, string> = {
-  NORM: "#3b82f6", MI: "#ef4444", STTC: "#f97316", CD: "#22c55e", HYP: "#a855f7",
-};
-const PROBS: Record<string, number> = {
-  NORM: 0.004, MI: 0.996, STTC: 0.013, CD: 0.012, HYP: 0.015,
+const FALLBACK_ECG = "M0,45 L30,45 C36,44 40,38 47,45 L64,45 L68,56 L71,8 L75,45 L86,45 C96,32 111,32 121,45 L165,45 L195,45 C201,44 205,38 212,45 L229,45 L233,56 L236,8 L240,45 L251,45 C261,32 276,32 286,45 L330,45";
+const FALLBACK: HeroData = {
+  ecgPath: FALLBACK_ECG,
+  rows: [
+    { label: "k = 40", hint: "long-range", bars: syntheticBars(0.8), color: "#3b82f6" },
+    { label: "k = 20", hint: "mid-range",  bars: syntheticBars(2.1), color: "#06b6d4" },
+    { label: "k = 10", hint: "local",      bars: syntheticBars(3.9), color: "#8b5cf6" },
+  ],
+  attn: [{ x: 55, w: 30, alpha: 0.55 }, { x: 220, w: 30, alpha: 0.50 }, { x: 93, w: 18, alpha: 0.22 }],
+  probs: { NORM: 0.004, MI: 0.996, STTC: 0.013, CD: 0.012, HYP: 0.015 },
+  cls: "MI",
+  conf: 0.996,
 };
 
-// ~30s cycle: ~5s animation + 20s hold + ~5s gap
+// Module-level cache — survives component remounts + hot-reloads
+let _cached: HeroData | null = null;
+
+// ─── Animation sequence ───────────────────────────────────────────────────────
+// Cycle: ~1.5 + 2.2 + 0.5 + 0.8 = ~5s animation  +  20s hold  +  0.5 fade  +  3.5 gap  ≈ 30s
 async function runLoop(c: AnimationControls) {
   await c.start("reset");
-  await new Promise((r) => setTimeout(r, 60));
+  await new Promise((r) => setTimeout(r, 60)); // flush reset to DOM before animating
   await c.start("ecgIn");
-  await c.start("ecgDraw");      // 1.5 s
+  await c.start("ecgDraw");      // 1.5 s — ECG trace draws left-to-right
   await c.start("convolution");  // 2.2 s — kernel sweeps + feature maps reveal in sync
-  await c.start("attnIn");       // 0.5 s
-  await c.start("outputIn");     // 0.8 s
-  await new Promise((r) => setTimeout(r, 20000));
-  await c.start("fadeAll");
-  await new Promise((r) => setTimeout(r, 3500));
+  await c.start("attnIn");       // 0.5 s — temporal attention bands appear
+  await c.start("outputIn");     // 0.8 s — probability bars fill
+  await new Promise((r) => setTimeout(r, 20000)); // hold
+  await c.start("fadeAll");      // 0.5 s
+  await new Promise((r) => setTimeout(r, 3500));  // blank gap
 }
 
+// ─── Class metadata ───────────────────────────────────────────────────────────
+const CLASSES = ["NORM", "MI", "STTC", "CD", "HYP"];
+const CLR: Record<string, string> = { NORM: "#3b82f6", MI: "#ef4444", STTC: "#f97316", CD: "#22c55e", HYP: "#a855f7" };
+const LBL: Record<string, string> = { MI: "Signs of Myocardial Infarction", NORM: "Normal Sinus Rhythm", STTC: "ST/T-wave Change", CD: "Conduction Disturbance", HYP: "Hypertrophy" };
+
+// ─── Component ────────────────────────────────────────────────────────────────
 export function Hero() {
   const c = useAnimation();
+  const [data, setData] = useState<HeroData>(_cached ?? FALLBACK);
 
+  // Fetch real ECG sample once; swap state (and cache) when it arrives
+  useEffect(() => {
+    if (_cached) return;
+    getPreloaded("MI")
+      .then((d) => { _cached = fromApiResponse(d); setData(_cached); })
+      .catch(() => {});
+  }, []);
+
+  // Animation loop — independent of data fetching
   useEffect(() => {
     let alive = true;
     (async () => { while (alive) await runLoop(c); })();
     return () => { alive = false; };
   }, [c]);
+
+  const confPct = (data.conf * 100).toFixed(1);
+  const clrCls = CLR[data.cls] ?? "#ef4444";
 
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center bg-navy-900 overflow-hidden px-6">
@@ -77,7 +173,7 @@ export function Hero() {
 
       <div className="relative z-10 flex flex-col items-center gap-8 w-full max-w-4xl">
 
-        {/* Title — static, outside animation loop */}
+        {/* ── Title — static, never part of loop ── */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -99,7 +195,7 @@ export function Hero() {
           </p>
         </motion.div>
 
-        {/* Card — always visible */}
+        {/* ── Card — always visible; animated content inside ── */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -110,10 +206,12 @@ export function Hero() {
             InceptionTime + Temporal Attention · Lead II · Forward Pass
           </p>
 
-          {/* Input signal */}
+          {/* ── Input signal + convolutional kernel sweep ── */}
           <div className="mb-1">
             <p className="text-xs text-gray-600 font-mono mb-1">input signal</p>
             <div className="relative h-[72px] w-full overflow-hidden">
+
+              {/* Sliding kernel — CSS left% so motion is in screen space (not SVG units) */}
               <motion.div
                 className="absolute inset-y-1 rounded pointer-events-none z-10"
                 style={{ width: "7%", border: "1px solid rgba(59,130,246,0.65)", backgroundColor: "rgba(59,130,246,0.07)" }}
@@ -132,6 +230,7 @@ export function Hero() {
                 <div className="absolute left-0 inset-y-0 w-px" style={{ backgroundColor: "rgba(59,130,246,0.9)" }} />
               </motion.div>
 
+              {/* ECG SVG — real signal path, draws with pathLength animation */}
               <motion.svg
                 viewBox={`0 0 ${VW} ${VH}`}
                 className="w-full h-full absolute inset-0"
@@ -143,23 +242,26 @@ export function Hero() {
                   fadeAll: { opacity: 0, transition: { duration: 0.4 } },
                 }}
               >
+                {/* glow */}
                 <motion.path
-                  d={ECG_PATH} stroke="rgba(96,165,250,0.12)" strokeWidth={7} fill="none" strokeLinecap="round"
+                  d={data.ecgPath} stroke="rgba(96,165,250,0.12)" strokeWidth={7} fill="none" strokeLinecap="round"
                   animate={c}
                   variants={{
                     reset:   { pathLength: 0, transition: { duration: 0 } },
                     ecgDraw: { pathLength: 1, transition: { duration: 1.5, ease: "easeInOut" } },
                   }}
                 />
+                {/* signal */}
                 <motion.path
-                  d={ECG_PATH} stroke="#60a5fa" strokeWidth={1.8} fill="none" strokeLinecap="round"
+                  d={data.ecgPath} stroke="#60a5fa" strokeWidth={1.8} fill="none" strokeLinecap="round"
                   animate={c}
                   variants={{
                     reset:   { pathLength: 0, transition: { duration: 0 } },
                     ecgDraw: { pathLength: 1, transition: { duration: 1.5, ease: "easeInOut" } },
                   }}
                 />
-                {ATTN.map((a, i) => (
+                {/* Temporal attention bands — appear after convolution phase */}
+                {data.attn.map((a, i) => (
                   <motion.rect
                     key={i} x={a.x} y={0} width={a.w} height={VH}
                     fill={`rgba(139,92,246,${a.alpha})`} rx={2}
@@ -176,7 +278,7 @@ export function Hero() {
             </div>
           </div>
 
-          {/* Inception feature maps */}
+          {/* ── Feature maps — real Grad-CAM, three kernel sizes ── */}
           <div className="flex items-center gap-2 mt-3 mb-2">
             <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-800 to-gray-700" />
             <span className="text-gray-600 text-xs font-mono">inception · multi-scale conv → feature maps</span>
@@ -184,7 +286,7 @@ export function Hero() {
           </div>
 
           <div className="space-y-2 mb-3">
-            {ROWS.map((row, ri) => (
+            {data.rows.map((row, ri) => (
               <motion.div
                 key={row.label}
                 className="flex items-center gap-2"
@@ -199,11 +301,18 @@ export function Hero() {
                 <span className="text-xs font-mono w-11 shrink-0 tabular-nums" style={{ color: row.color }}>{row.label}</span>
                 <span className="text-xs text-gray-700 font-mono w-16 shrink-0">{row.hint}</span>
                 <div className="flex-1 relative h-7">
+                  {/* dim background always shows shape — gives context while reveal animates */}
                   <div className="absolute inset-0 flex items-end gap-px opacity-[0.18]">
                     {row.bars.map((h, bi) => (
                       <div key={bi} className="flex-1" style={{ height: `${h}%`, backgroundColor: row.color }} />
                     ))}
                   </div>
+                  {/*
+                    Bright reveal: clipPath sweeps from "inset(0% 100% 0% 0%)" → "inset(0% 0% 0% 0%)"
+                    in sync with the kernel scan (same 2.2s duration).
+                    FIX: opacity is explicitly 1 in reset + convolution so it survives the fadeAll→reset
+                    cycle on subsequent loops (fadeAll sets opacity:0; reset must restore it).
+                  */}
                   <motion.div
                     className="absolute inset-0 flex items-end gap-px"
                     initial={{ clipPath: "inset(0% 100% 0% 0%)", opacity: 1 }}
@@ -223,7 +332,7 @@ export function Hero() {
             ))}
           </div>
 
-          {/* Output */}
+          {/* ── Classification output ── */}
           <div className="flex items-center gap-2 mb-2">
             <div className="h-px flex-1 bg-gradient-to-r from-transparent via-gray-800 to-gray-700" />
             <span className="text-gray-600 text-xs font-mono">temporal attention → GAP → classifier</span>
@@ -231,7 +340,8 @@ export function Hero() {
           </div>
 
           <motion.div
-            className="rounded-xl border border-red-900/50 bg-red-950/20 p-3"
+            className="rounded-xl p-3"
+            style={{ border: `1px solid ${clrCls}30`, backgroundColor: `${clrCls}10` }}
             initial={{ opacity: 0 }}
             animate={c}
             variants={{
@@ -243,10 +353,10 @@ export function Hero() {
             <div className="flex items-center justify-between mb-2">
               <div>
                 <p className="text-xs text-gray-500 font-mono">Prediction</p>
-                <p className="text-white font-semibold text-sm">Signs of Myocardial Infarction</p>
+                <p className="text-white font-semibold text-sm">{LBL[data.cls] ?? data.cls}</p>
               </div>
               <div className="text-right">
-                <p className="text-xl font-bold text-red-400">99.6%</p>
+                <p className="text-xl font-bold" style={{ color: clrCls }}>{confPct}%</p>
                 <p className="text-xs text-gray-500">confidence</p>
               </div>
             </div>
@@ -260,7 +370,7 @@ export function Hero() {
                       animate={c}
                       variants={{
                         reset:    { width: "0%", transition: { duration: 0 } },
-                        outputIn: { width: `${(PROBS[cls] ?? 0) * 100}%`, transition: { duration: 0.6, ease: "easeOut" } },
+                        outputIn: { width: `${(data.probs[cls] ?? 0) * 100}%`, transition: { duration: 0.6, ease: "easeOut" } },
                       }}
                     />
                   </div>
