@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { HeartDiagram } from "@/components/HeartDiagram";
 
 export const metadata: Metadata = {
   title: "How I Built an ECG Arrhythmia Classifier — Revant Bisht",
@@ -56,6 +57,80 @@ function Code({ children }: { children: string }) {
   );
 }
 
+/** Inline callout box — blue for definitions, amber for "why it matters" insights */
+function InfoBox({
+  accent = "blue",
+  label,
+  children,
+}: {
+  accent?: "blue" | "amber";
+  label: string;
+  children: React.ReactNode;
+}) {
+  const border =
+    accent === "amber"
+      ? "border-amber-900/50 bg-amber-950/15"
+      : "border-blue-900/50 bg-blue-950/15";
+  const labelClr = accent === "amber" ? "text-amber-400" : "text-blue-400";
+  return (
+    <div className={`not-prose rounded-xl border p-4 my-5 ${border}`}>
+      <p className={`text-xs font-mono uppercase tracking-widest mb-3 ${labelClr}`}>
+        {label}
+      </p>
+      <div className="text-gray-300 text-sm leading-relaxed space-y-2">{children}</div>
+    </div>
+  );
+}
+
+/** Likelihood confidence spectrum visual */
+function LikelihoodSpectrum() {
+  const bands = [
+    { pct: "100%", label: "Definitive", sub: "both cardiologists agree", cls: "border-green-800/70 bg-green-950/25 text-green-400", dim: false },
+    { pct: "80%",  label: "Probable",   sub: "some uncertainty",          cls: "border-gray-700 bg-gray-900/40 text-gray-500",        dim: true },
+    { pct: "50%",  label: "Possible",   sub: "significant uncertainty",   cls: "border-gray-700 bg-gray-900/40 text-gray-500",        dim: true },
+  ];
+  return (
+    <div className="grid grid-cols-3 gap-2 mt-3">
+      {bands.map((b) => (
+        <div
+          key={b.pct}
+          className={`rounded-lg border px-3 py-2.5 ${b.cls} ${b.dim ? "opacity-40" : ""}`}
+        >
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-lg font-bold tabular-nums">{b.pct}</span>
+            {!b.dim && <span className="text-xs text-green-500 font-mono">✓ kept</span>}
+            {b.dim && <span className="text-xs text-gray-600 font-mono">✗ removed</span>}
+          </div>
+          <p className="text-xs font-medium mt-0.5">{b.label}</p>
+          <p className="text-[10px] text-gray-500 mt-0.5">{b.sub}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** "Explore the data" CTA — links to the (future) EDA page */
+function EDAExploreLink() {
+  return (
+    <a
+      href="/eda"
+      className="group not-prose flex items-center justify-between rounded-xl border border-dashed border-blue-800/50 bg-blue-950/10 hover:border-blue-600/70 hover:bg-blue-950/20 px-5 py-4 transition-all mt-6"
+    >
+      <div>
+        <p className="text-blue-400 font-semibold text-sm group-hover:text-blue-300 transition-colors">
+          Explore the data with me
+        </p>
+        <p className="text-gray-500 text-xs mt-0.5">
+          Signal distributions · PCA · Per-class morphology · Lead correlations · Label co-occurrence
+        </p>
+      </div>
+      <span className="text-blue-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all text-xl shrink-0 ml-4">
+        →
+      </span>
+    </a>
+  );
+}
+
 function Table({
   headers,
   rows,
@@ -110,15 +185,18 @@ export default function BlogPage() {
       <div className="max-w-3xl mx-auto px-6 pt-28 pb-24">
         <div className="mb-16 space-y-4">
           <p className="text-blue-400 text-sm font-mono tracking-widest uppercase">
-            Deep Learning · Cardiology · MLOps
+            Electrical Engineering · Deep Learning · Clinical AI
           </p>
           <h1 className="text-4xl font-bold text-white leading-tight">
             Building a 12-Lead ECG Arrhythmia Classifier
           </h1>
           <p className="text-gray-400 text-lg">
-            From raw PTB-XL waveforms to a live explainable demo — architecture
-            decisions backed by data, 0.928 macro AUC-ROC, and Grad-CAM
-            heatmaps that highlight clinically known diagnostic regions.
+            The heart generates a signal. ECG measures it. The diagnosis is
+            in the waveform shape — not the frequency content. That single EE
+            insight drove every architectural decision.{" "}
+            <span className="text-blue-400 font-medium">
+              0.928 macro AUC-ROC on PTB-XL.
+            </span>
           </p>
           <div className="flex flex-wrap gap-2 pt-2">
             {[
@@ -141,55 +219,152 @@ export default function BlogPage() {
         </div>
 
         <Section id="problem" tag="01 · The Problem" title="Why Automated ECG Analysis Matters">
+          <div className="not-prose grid grid-cols-3 gap-4 my-6">
+            <Metric value="18M"  label="CVD deaths per year"  sub="#1 cause of death globally (WHO)" />
+            <Metric value="300M" label="ECGs recorded annually" sub="fastest, cheapest cardiac test" />
+            <Metric value="~10 min" label="specialist read time" sub="per ECG — if one is available" />
+          </div>
+
+          <InfoBox label="This is an electrical engineering problem">
+            <p>
+              The heart generates electrical impulses at the{" "}
+              <strong className="text-white">SA node</strong>; a 12-lead ECG
+              captures the resulting voltage field from{" "}
+              <strong className="text-white">
+                10 electrode positions × 12 leads × 1000 time steps
+              </strong>
+              . The diagnostic signal is{" "}
+              <strong className="text-white">morphological</strong> — it lives
+              in the <em>shape</em> of the PQRST complex, not its frequency
+              content. All five classes share the same 0–40 Hz bands; what
+              differs is waveform geometry.
+            </p>
+            <HeartDiagram />
+          </InfoBox>
+
           <p>
-            Cardiovascular disease is the leading cause of death globally.
-            A 12-lead ECG is the first-line diagnostic tool — inexpensive,
-            non-invasive, and available in every clinic. But interpreting
-            one correctly requires years of specialist training, and demand
-            far outstrips supply in many healthcare systems.
+            The problem is not the sensor — it&apos;s the{" "}
+            <strong className="text-white">interpretation bottleneck</strong>.
+            There are fewer than 1 cardiologist per 10,000 people in most of
+            the world. A single specialist reviews 50–100 ECGs per day; at that
+            pace, backlogs accumulate and{" "}
+            <strong className="text-white">
+              time-critical conditions go undetected
+            </strong>{" "}
+            — myocardial infarction being the clearest example, where outcome
+            degrades measurably with every hour of delay.
           </p>
+          <div className="not-prose grid grid-cols-2 gap-3 my-5">
+            <div className="rounded-lg border border-red-900/50 bg-red-950/15 p-4">
+              <p className="text-red-400 font-mono text-xs uppercase tracking-widest mb-1.5">
+                Abnormal
+              </p>
+              <p className="text-white font-semibold text-sm">
+                Flag for immediate review
+              </p>
+              <p className="text-gray-500 text-xs mt-1">
+                High-confidence detections → cardiologist queue, no delay
+              </p>
+            </div>
+            <div className="rounded-lg border border-green-900/50 bg-green-950/15 p-4">
+              <p className="text-green-400 font-mono text-xs uppercase tracking-widest mb-1.5">
+                Normal
+              </p>
+              <p className="text-white font-semibold text-sm">
+                Lighter triage path
+              </p>
+              <p className="text-gray-500 text-xs mt-1">
+                Routine records flow through a fast-lane — backlog cleared
+              </p>
+            </div>
+          </div>
           <p>
-            The PTB-XL benchmark (Strodthoff et al., 2020) established a
-            rigorous evaluation framework: given 10 seconds of 12-lead ECG
-            data, classify each record into five clinically meaningful
-            superdiagnostic categories simultaneously. The multi-label setup
-            reflects real clinical reality — a patient can present with both
-            conduction disturbance and hypertrophy.
+            The model doesn&apos;t replace the cardiologist.{" "}
+            <strong className="text-blue-400">It scales their attention.</strong>
           </p>
         </Section>
 
-        <Section id="data" tag="02 · The Data" title="PTB-XL Dataset">
+        <Section id="data" tag="02 · The Data" title="Exploring the PTB-XL Dataset">
           <p>
-            PTB-XL (Wagner et al., 2020) contains 21,799 clinical ECG records
-            from 18,869 patients, each 10 seconds long at 500 Hz
-            (downsampled to 100 Hz for this project). Records are annotated by
-            up to two cardiologists with SCP-ECG codes, which I mapped to five
-            superdiagnostic classes.
+            PTB-XL (Wagner et al., 2020) is the largest openly available
+            clinical 12-lead ECG dataset: <strong className="text-white">21,799 recordings</strong>{" "}
+            from 18,869 patients, each 10 seconds at 500 Hz — downsampled to
+            100 Hz for this project. Each record was annotated by{" "}
+            <strong className="text-white">up to two cardiologists</strong>{" "}
+            using SCP-ECG codes, the European standard for machine-readable
+            ECG diagnoses.
           </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 my-6">
-            <Metric value="15,130" label="Labeled records" sub="min_likelihood=100%" />
-            <Metric value="12,133" label="Training" sub="folds 1–8" />
-            <Metric value="1,491" label="Validation" sub="fold 9" />
-            <Metric value="1,506" label="Test" sub="fold 10" />
+
+          <InfoBox label="What is SCP-ECG?">
+            <p>
+              <strong className="text-white">SCP-ECG</strong> is the ISO
+              standard for machine-readable ECG diagnoses — think of it as a
+              structured code system for cardiologist findings. PTB-XL contains{" "}
+              <strong className="text-white">71 distinct codes</strong>. For
+              this project I collapsed them into{" "}
+              <strong className="text-white">5 superclasses</strong> (NORM, MI,
+              STTC, CD, HYP) — the same grouping used in the published Strodthoff
+              et al. benchmark.
+            </p>
+          </InfoBox>
+
+          <div className="not-prose grid grid-cols-2 md:grid-cols-4 gap-4 my-6">
+            <Metric value="21,799" label="Total records"    sub="10 s · 12 leads · 100 Hz" />
+            <Metric value="71"     label="SCP-ECG codes"   sub="→ 5 superclasses" />
+            <Metric value="15,130" label="After filtering"  sub="100% likelihood only" />
+            <Metric value="2"      label="Cardiologists"    sub="per annotation" />
           </div>
-          <p>
-            Applying a 100% likelihood filter removes ambiguous annotations,
-            leaving 15,130 records. Class distribution is significantly
-            imbalanced: NORM (47.4%) dominates while HYP (9.7%) is rare.
-            84% of records carry a single label; 13% have two; 3% have three —
-            confirming that independent sigmoid outputs are the correct
-            formulation.
-          </p>
+
+          <InfoBox accent="amber" label="The 100% likelihood filter — and why it matters">
+            <p>
+              Every annotation in PTB-XL carries a{" "}
+              <strong className="text-white">likelihood score</strong> —
+              the annotating cardiologist&apos;s confidence in the diagnosis:
+            </p>
+            <LikelihoodSpectrum />
+            <p className="mt-3">
+              Training on ambiguous examples (80% or 50% likelihood) teaches
+              the model to reproduce{" "}
+              <strong className="text-white">cardiologist uncertainty</strong>,
+              not diagnostic ground truth. By keeping only 100%-likelihood
+              annotations, we remove 6,669 records but are left with{" "}
+              <strong className="text-white">
+                15,130 records where the diagnosis was definitive
+              </strong>{" "}
+              — the cleanest possible training signal for the model.
+            </p>
+          </InfoBox>
+
+          <InfoBox accent="amber" label="The class imbalance challenge">
+            <p>
+              Real clinical data mirrors real life: most people who get an ECG
+              are — thankfully — healthy.{" "}
+              <strong className="text-white">NORM accounts for nearly half</strong>{" "}
+              the dataset simply because disease prevalence is low. This is not
+              a dataset flaw; it&apos;s an accurate reflection of the world.
+            </p>
+            <p>
+              The challenge: the model must be{" "}
+              <strong className="text-white">equally correct on all five classes</strong>.
+              An algorithm that misses 11% of MIs to pad its overall accuracy
+              figure is not a medical tool — it&apos;s a liability. This is why
+              per-class AUC-ROC, not overall accuracy, is the right metric,
+              and why class-weighted loss is essential during training.
+            </p>
+          </InfoBox>
+
           <Table
-            headers={["Class", "Description", "Count", "% of test"]}
+            headers={["Class", "Description", "Test records", "% of test"]}
             rows={[
-              ["NORM", "Normal sinus rhythm", "721", "47.9%"],
-              ["CD", "Conduction disturbance", "456", "30.3%"],
-              ["STTC", "ST/T-wave change", "271", "18.0%"],
-              ["MI", "Myocardial infarction", "171", "11.4%"],
-              ["HYP", "Hypertrophy", "132", "8.8%"],
+              ["NORM", "Normal sinus rhythm",    "721", "47.9%"],
+              ["CD",   "Conduction disturbance", "456", "30.3%"],
+              ["STTC", "ST/T-wave change",       "271", "18.0%"],
+              ["MI",   "Myocardial infarction",  "171", "11.4%"],
+              ["HYP",  "Hypertrophy",            "132",  "8.8%"],
             ]}
           />
+
+          <EDAExploreLink />
         </Section>
 
         <Section id="eda" tag="03 · EDA" title="What the Data Told Me">

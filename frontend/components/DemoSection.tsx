@@ -59,8 +59,8 @@ export function DemoSection() {
           <h2 className="text-3xl font-bold text-white">Try the Model</h2>
           <p className="text-gray-400 max-w-2xl">
             Select one of the conditions below to see how the model reads a real
-            ECG from the PTB-XL dataset. All responses are pre-cached — results
-            appear instantly.
+            ECG from the PTB-XL dataset — a research-grade clinical dataset used
+            in published peer-reviewed benchmarks.
           </p>
         </div>
 
@@ -154,6 +154,7 @@ export function DemoSection() {
                 predictedClass={data.predicted_class}
               />
             </div>
+
           </div>
         )}
 
