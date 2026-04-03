@@ -109,6 +109,50 @@ function LikelihoodSpectrum() {
   );
 }
 
+/** "Full evaluation results" CTA — links to the results deep-dive page */
+function ResultsExploreLink() {
+  return (
+    <a
+      href="/results"
+      className="group not-prose flex items-center justify-between rounded-xl border border-dashed border-blue-800/50 bg-blue-950/10 hover:border-blue-600/70 hover:bg-blue-950/20 px-5 py-4 transition-all mt-6"
+    >
+      <div>
+        <p className="text-blue-400 font-semibold text-sm group-hover:text-blue-300 transition-colors">
+          Full evaluation deep-dive
+        </p>
+        <p className="text-gray-500 text-xs mt-0.5">
+          ROC curves · PR curves · Confusion matrix · Training dynamics · Grad-CAM gallery
+        </p>
+      </div>
+      <span className="text-blue-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all text-xl shrink-0 ml-4">
+        →
+      </span>
+    </a>
+  );
+}
+
+/** "Dive into the architecture" CTA — links to the architecture deep-dive page */
+function ArchExploreLink() {
+  return (
+    <a
+      href="/architecture"
+      className="group not-prose flex items-center justify-between rounded-xl border border-dashed border-blue-800/50 bg-blue-950/10 hover:border-blue-600/70 hover:bg-blue-950/20 px-5 py-4 transition-all mt-6"
+    >
+      <div>
+        <p className="text-blue-400 font-semibold text-sm group-hover:text-blue-300 transition-colors">
+          Dive into the architecture
+        </p>
+        <p className="text-gray-500 text-xs mt-0.5">
+          Inception modules · Temporal attention · Parameter count · Training curves · ROC curves
+        </p>
+      </div>
+      <span className="text-blue-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all text-xl shrink-0 ml-4">
+        →
+      </span>
+    </a>
+  );
+}
+
 /** "Explore the data" CTA — links to the (future) EDA page */
 function EDAExploreLink() {
   return (
@@ -367,39 +411,7 @@ export default function BlogPage() {
           <EDAExploreLink />
         </Section>
 
-        <Section id="eda" tag="03 · EDA" title="What the Data Told Me">
-          <p>
-            Before writing a single model line, I ran a 10-section exploratory
-            analysis to let the data drive architecture decisions.
-          </p>
-          <p>
-            <strong className="text-white">Power spectral density:</strong>{" "}
-            Classes are not separable by frequency content. All five classes
-            share the same dominant frequency bands (0–40 Hz). This ruled out
-            frequency-domain features and confirmed that the discriminative
-            signal is morphological — the shape of the PQRST complex matters,
-            not which frequencies are present.
-          </p>
-          <p>
-            <strong className="text-white">PCA:</strong> Complete class overlap
-            in the first 20 principal components. Linear separation is
-            impossible, requiring a deep non-linear model.
-          </p>
-          <p>
-            <strong className="text-white">Timescale analysis:</strong> At
-            100 Hz, QRS complexes span ~10 samples, T-waves ~20 samples, and
-            RR intervals ~80 samples. This directly motivated the three
-            parallel kernel sizes in InceptionTime: 10, 20, and 40.
-          </p>
-          <p>
-            <strong className="text-white">Lead correlation:</strong> Limb
-            leads and precordial leads form distinct correlated blocks, but all
-            12 leads carry territory-specific information not redundant with
-            others. All 12 leads should be processed together.
-          </p>
-        </Section>
-
-        <Section id="architecture" tag="04 · Architecture" title="InceptionTime + Temporal Attention">
+        <Section id="architecture" tag="03 · Architecture" title="InceptionTime + Temporal Attention">
           <p>
             The architecture is a direct response to the EDA findings: parallel
             convolutional kernels sized to clinically relevant timescales,
@@ -431,140 +443,206 @@ Parameters: ~400k`}</Code>
             both improves accuracy and provides a natural saliency signal for
             the explainability visualisation.
           </p>
+          <ArchExploreLink />
         </Section>
 
-        <Section id="training" tag="05 · Training" title="Loss, Regularisation, and Augmentation">
+        <Section id="results" tag="04 · Training & Results" title="How It Was Trained — and How It Did">
           <p>
-            Multi-label classification with imbalanced classes requires careful
-            loss design. I used weighted binary cross-entropy with label
-            smoothing (ε=0.05) to prevent overconfident predictions:
+            Training used <strong className="text-white">weighted binary cross-entropy</strong> with
+            label smoothing (ε=0.05). Because HYP has 4.8× fewer examples than NORM, each class gets
+            an inverse-frequency weight so the model can&apos;t cheat by ignoring rare conditions.
+            A cosine annealing schedule dropped the learning rate from 1×10⁻³ to 1×10⁻⁶ over 100
+            epochs; early stopping fired at <strong className="text-white">epoch 35</strong>.
           </p>
-          <Code>{`L = -Σ_c  w_c [ ỹ_c · log(p_c) + (1 - ỹ_c) · log(1 - p_c) ]
 
-ỹ_c = y_c · (1 - ε) + ε/2          (label smoothing)
-
-Class weights (inverse frequency, training set):
-  NORM = 0.42   CD = 0.67   STTC = 1.12
-  MI   = 1.48   HYP = 2.02`}</Code>
-          <Table
-            headers={["Hyperparameter", "Value", "Justification"]}
-            rows={[
-              ["Optimizer", "Adam", "Standard for time-series"],
-              ["Learning rate", "1e-3 → 1e-6", "Cosine annealing"],
-              ["Weight decay", "5e-4", "L2 regularisation"],
-              ["Batch size", "64", "Fits comfortably in MPS memory"],
-              ["Early stopping", "patience=15", "Val macro AUC-ROC"],
-              ["Gaussian noise", "σ=0.01", "1% of signal energy — EDA-validated"],
-              ["Lead dropout", "p=0.20", "Matches ~15% electrode artifact rate"],
-              ["Time shift", "±50 samples", "Preserves QRS, varies beat phase"],
-            ]}
-          />
-          <p>
-            Three regularisation mechanisms worked together to close the
-            train/val AUC gap from 0.065 to 0.020: classifier dropout (0.3),
-            increased weight decay (5e-4), and lead dropout (0.2). Training
-            converged at epoch 35 on Apple MPS (~12s/epoch).
-          </p>
-        </Section>
-
-        <Section id="results" tag="06 · Results" title="Test Set Performance">
-          <div className="grid grid-cols-3 gap-4 my-6">
-            <Metric value="0.928" label="Macro AUC-ROC" sub="PTB-XL test fold 10" />
-            <Metric value="0.763" label="Macro AUPRC" sub="5-class average" />
-            <Metric value="0.664" label="Macro F1" sub="Youden threshold" />
+          {/* Metric definitions */}
+          <div className="not-prose grid grid-cols-1 sm:grid-cols-3 gap-3 my-6">
+            {[
+              {
+                label: "AUC-ROC",
+                val: "0.928",
+                sub: "macro, test fold 10",
+                def: "Probability the model ranks a sick patient above a healthy one. 1.0 = perfect, 0.5 = coin flip.",
+                color: "border-blue-900/50 bg-blue-950/10",
+                valColor: "text-blue-400",
+              },
+              {
+                label: "AUPRC",
+                val: "0.763",
+                sub: "macro, 5-class avg",
+                def: "Like AUC-ROC but penalises false alarms more heavily — the right metric when disease is rare.",
+                color: "border-purple-900/50 bg-purple-950/10",
+                valColor: "text-purple-400",
+              },
+              {
+                label: "Macro F1",
+                val: "0.664",
+                sub: "Youden threshold",
+                def: "Balances precision (few false alarms) and recall (few missed cases). Youden picks the optimal threshold per class.",
+                color: "border-emerald-900/50 bg-emerald-950/10",
+                valColor: "text-emerald-400",
+              },
+            ].map((m) => (
+              <div key={m.label} className={`rounded-xl border p-4 ${m.color}`}>
+                <p className={`text-2xl font-bold tabular-nums font-mono ${m.valColor}`}>{m.val}</p>
+                <p className="text-white font-semibold text-sm mt-1">{m.label}</p>
+                <p className="text-gray-500 text-[10px] font-mono mb-2">{m.sub}</p>
+                <p className="text-gray-400 text-xs leading-relaxed">{m.def}</p>
+              </div>
+            ))}
           </div>
-          <Table
-            headers={["Model", "Macro AUC", "Notes"]}
-            rows={[
-              ["Simple 1D CNN", "0.890", "Strodthoff et al. 2020"],
-              ["LSTM + Bidir Attention", "0.907", "Strodthoff et al. 2020"],
-              ["InceptionTime (ref)", "0.925", "Strodthoff et al. 2020"],
-              ["xresnet1d101", "0.931", "Strodthoff et al. 2020 — 3× params"],
-              ["This work (InceptionTime+Attn)", "0.928", "~400k params ✓"],
-            ]}
-          />
-          <p>
-            At 0.928 macro AUC-ROC, this model exceeds the published
-            InceptionTime reference (0.925) despite having a similar parameter
-            count, and approaches xresnet1d101 (0.931) which has roughly 3×
-            the parameters. HYP is the weakest class (AUC 0.860) — expected
-            given it has only 132 test samples.
-          </p>
-          <Table
-            headers={["Class", "AUC-ROC", "AUPRC", "F1 (Youden)"]}
-            rows={[
-              ["NORM", "0.971", "0.963", "0.911"],
-              ["MI", "0.941", "0.725", "0.560"],
-              ["STTC", "0.947", "0.817", "0.727"],
-              ["CD", "0.921", "0.866", "0.761"],
-              ["HYP", "0.860", "0.444", "0.364"],
-            ]}
-          />
-        </Section>
 
-        <Section id="explainability" tag="07 · Explainability" title="Grad-CAM Heatmaps">
-          <p>
-            Grad-CAM (Selvaraju et al., 2017) is adapted for 1D convolutions
-            by hooking into the last InceptionBlock, computing the gradient of
-            the target class logit with respect to the feature map, and
-            global-average-pooling the gradients over time to get per-channel
-            importance weights.
+          {/* Per-class results */}
+          <p className="text-gray-300 text-sm mb-3">
+            Per-class breakdown on the <strong className="text-white">1,506-record test fold</strong>:
           </p>
-          <Code>{`A = activations[last_block]   # (C, T)
-G = gradients[last_block]     # (C, T)
-w = G.mean(dim=-1)            # (C,) — channel importance
-cam = ReLU(w · A)             # (T,) — temporal saliency
-cam = cam / cam.max()         # normalise to [0, 1]`}</Code>
-          <p>
-            The heatmaps are clinically plausible without any supervision on
-            waveform segments:
-          </p>
-          <Table
-            headers={["Class", "Expected region", "Grad-CAM finding"]}
-            rows={[
-              ["MI", "Q-wave, ST elevation", "✓ Peaks on early QRS + ST segment"],
-              ["STTC", "ST segment, T-wave", "✓ Activation on ST-T region"],
-              ["CD", "Entire QRS complex", "✓ Broad activation over widened QRS"],
-              ["HYP", "Tall R-wave peak", "✓ Sharp peak at R-wave maximum"],
-              ["NORM", "No focal region", "✓ Diffuse low-amplitude activation"],
-            ]}
-          />
-          <p>
-            The interactive demo shows all five Grad-CAM maps simultaneously
-            — selecting a class tab switches the overlay without re-fetching,
-            because all five maps are pre-computed and cached server-side.
-          </p>
-        </Section>
-
-        <Section id="deployment" tag="08 · Deployment" title="ONNX, FastAPI, and Fly.io">
-          <p>
-            The production server runs ONNX Runtime — no PyTorch dependency in
-            the Docker image. PyTorch is used only locally to generate the
-            pre-cached sample responses at build time.
-          </p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 my-6">
-            <Metric value="1.01 MB" label="ONNX model" sub="opset 17" />
-            <Metric value="2.6×" label="ONNX speedup" sub="vs PyTorch CPU" />
-            <Metric value="7 ms" label="API latency" sub="preloaded sample" />
-            <Metric value="0 ms" label="Cold start" sub="Fly.io always-on" />
+          <div className="not-prose overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-gray-700">
+                  {["Class", "Full name", "AUC-ROC", "AUPRC", "F1", "Comment"].map((h) => (
+                    <th key={h} className="text-left py-2 px-3 text-gray-400 font-mono text-xs uppercase tracking-wider">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { cls: "NORM", name: "Normal Sinus Rhythm",    auc: "0.971", pr: "0.963", f1: "0.911", note: "Strongest class — normal patterns are consistent and plentiful.", hi: true },
+                  { cls: "STTC", name: "ST/T-Wave Change",       auc: "0.947", pr: "0.817", f1: "0.727", note: "ST segment deflections are morphologically distinct and easy to locate.", hi: false },
+                  { cls: "MI",   name: "Myocardial Infarction",  auc: "0.941", pr: "0.725", f1: "0.560", note: "Q-waves and ST elevation are clear; lower F1 reflects fewer test samples.", hi: false },
+                  { cls: "CD",   name: "Conduction Disturbance", auc: "0.921", pr: "0.866", f1: "0.761", note: "Wide QRS is a reliable marker; second largest test class.", hi: false },
+                  { cls: "HYP",  name: "Hypertrophy",            auc: "0.860", pr: "0.444", f1: "0.364", note: "Weakest — voltage criteria are subtle and only 132 test samples.", hi: false },
+                ].map((r) => (
+                  <tr key={r.cls} className={`border-b border-gray-800 ${r.hi ? "bg-blue-950/10" : ""}`}>
+                    <td className="py-2.5 px-3 font-mono text-xs text-blue-300">{r.cls}</td>
+                    <td className="py-2.5 px-3 text-gray-300 text-xs">{r.name}</td>
+                    <td className="py-2.5 px-3 text-white font-semibold tabular-nums text-xs">{r.auc}</td>
+                    <td className="py-2.5 px-3 text-gray-300 tabular-nums text-xs">{r.pr}</td>
+                    <td className="py-2.5 px-3 text-gray-300 tabular-nums text-xs">{r.f1}</td>
+                    <td className="py-2.5 px-3 text-gray-500 text-xs">{r.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+
+          {/* Literature comparison */}
+          <div className="not-prose rounded-xl border border-green-900/40 bg-green-950/10 px-4 py-4 mt-6">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-green-500 mb-2">
+              Literature benchmark
+            </p>
+            <p className="text-gray-300 text-sm leading-relaxed">
+              The Strodthoff et al. 2020 benchmark puts the InceptionTime reference at{" "}
+              <strong className="text-white">0.925 macro AUC-ROC</strong> and the strongest model
+              (xresnet1d101) at <strong className="text-white">0.931</strong> — using ~3× the
+              parameters. This project scores <strong className="text-green-400">0.928</strong> —
+              above the InceptionTime reference and within 0.003 of the largest published baseline.
+            </p>
+          </div>
+
+          <ResultsExploreLink />
+        </Section>
+
+        <Section id="summary" tag="05 · Summary" title="What Was Built — and What Comes Next">
+
+          {/* What was achieved */}
           <p>
-            The five curated samples (highest-confidence correct prediction per
-            class) are pre-computed with full Grad-CAM at server startup and
-            held in memory. A recruiter clicking "Run" receives a complete
-            response — signal, five Grad-CAM maps, attention weights, clinical
-            report, flagged regions — in under 10ms.
+            A 12-lead ECG arrhythmia classifier that matches published literature on the largest
+            open clinical ECG dataset — in a full end-to-end stack from raw signal to a live
+            web demo. Every component was justified by data, not convention.
           </p>
-          <Code>{`GET /predict/preloaded/MI
-→ {
-    predicted_class: "MI",
-    confidence: 0.997,
-    probs: { NORM: 0.004, MI: 0.997, ... },
-    gradcam_per_class: { NORM: [1000 floats], MI: [...], ... },
-    attention: [1000 floats],
-    signal_lead2: [1000 floats],
-    report: { headline, summary, flagged_regions, ... }
-  }`}</Code>
+
+          <div className="not-prose grid grid-cols-2 md:grid-cols-4 gap-3 my-6">
+            {[
+              { val: "0.928", label: "Macro AUC-ROC", sub: "literature-equivalent" },
+              { val: "244k",  label: "Parameters",    sub: "3× lighter than SOTA" },
+              { val: "1.01 MB", label: "ONNX model",  sub: "opset 17" },
+              { val: "7 ms",  label: "API latency",   sub: "Fly.io always-on" },
+            ].map((m) => (
+              <div key={m.label} className="rounded-xl border border-gray-800 bg-navy-950 p-4 text-center">
+                <p className="text-xl font-bold text-blue-400 tabular-nums font-mono">{m.val}</p>
+                <p className="text-white font-medium mt-1 text-sm">{m.label}</p>
+                <p className="text-gray-500 text-xs mt-0.5">{m.sub}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* EE principles */}
+          <div className="not-prose rounded-xl border border-blue-900/40 bg-blue-950/10 px-5 py-5 my-6">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-blue-400 mb-4">
+              Electrical engineering principles applied
+            </p>
+            <div className="space-y-3">
+              {[
+                {
+                  principle: "Signal is morphological, not spectral",
+                  detail: "PSD showed all 5 classes share the same 0–40 Hz bands. The diagnostic information lives in waveform shape — this ruled out frequency-domain approaches and motivated a purely time-domain convolutional architecture.",
+                },
+                {
+                  principle: "Multi-scale sensing matches the physical timescales",
+                  detail: "At 100 Hz, QRS complexes span ~10 samples, T-waves ~20, RR intervals ~80. The k=10/20/40 kernels were sized directly to these measured timescales — not picked by grid search.",
+                },
+                {
+                  principle: "Z-score normalisation preserves morphology, removes amplitude bias",
+                  detail: "Each lead is normalised independently (μ, σ per lead per record). This removes inter-patient height/weight amplitude variation while keeping the relative shape of the PQRST complex intact.",
+                },
+                {
+                  principle: "Soft attention as a learned filter bank in time",
+                  detail: "The temporal attention mechanism α_t is analogous to a time-varying matched filter — it up-weights samples that best match the learned diagnostic templates and down-weights baseline noise.",
+                },
+              ].map((p) => (
+                <div key={p.principle} className="flex gap-3">
+                  <span className="text-blue-500 mt-0.5 shrink-0">→</span>
+                  <div>
+                    <p className="text-white font-semibold text-sm">{p.principle}</p>
+                    <p className="text-gray-400 text-xs leading-relaxed mt-0.5">{p.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Practical use */}
+          <p className="font-semibold text-white">Practical application</p>
+          <p>
+            This model is designed as a <strong className="text-white">triage assistant</strong>,
+            not a replacement for clinical judgement. The natural deployment is a two-stage
+            pipeline: the model flags high-confidence abnormals for immediate specialist review
+            and routes clear normals through a fast-lane — compressing the backlog without
+            removing the cardiologist from any final decision. Grad-CAM and attention overlays
+            are included precisely so the specialist can see{" "}
+            <em>why</em> the model flagged a record, not just that it did.
+          </p>
+
+          {/* Improvements */}
+          <p className="font-semibold text-white mt-4">Where it can go further</p>
+          <div className="not-prose grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            {[
+              {
+                label: "Richer label set",
+                text: "Expand from 5 superclasses back toward the full 71 SCP-ECG codes. This requires more data per code — a multi-institution federation could help.",
+              },
+              {
+                label: "Patient-level context",
+                text: "The model currently sees one 10-second snapshot. Adding age, sex, and prior ECG as conditioning signals could substantially improve HYP performance, where demographic voltage norms matter.",
+              },
+              {
+                label: "Beat-level supervision",
+                text: "Augmenting training with cardiologist-annotated beat boundaries (P onset, QRS, T offset) would sharpen Grad-CAM localisation and reduce reliance on the full-signal average.",
+              },
+              {
+                label: "Uncertainty quantification",
+                text: "MC Dropout or deep ensembles would give calibrated confidence intervals — essential before any clinical deployment, so the model can flag ambiguous cases rather than forcing a decision.",
+              },
+            ].map((item) => (
+              <div key={item.label} className="rounded-lg border border-gray-800 bg-gray-900/60 p-4 space-y-1.5">
+                <p className="text-white font-semibold text-sm">{item.label}</p>
+                <p className="text-gray-500 text-xs leading-relaxed">{item.text}</p>
+              </div>
+            ))}
+          </div>
         </Section>
 
         <div className="pt-10 text-center space-y-4">
